@@ -76,7 +76,7 @@
 
 NeedlePlanner::NeedlePlanner() {
     ROS_INFO("needle planner constructor: initializations");
-    needle_radius_ = DEFAULT_NEEDLE_RADIUS;
+    needle_radius_ = DEFAULT_NEEDLE_RADIUS;                             
     needle_axis_ht_ = DEFAULT_NEEDLE_AXIS_HT;
     grasp_depth_ = DEFAULT_NEEDLE_GRASP_DEPTH;     
     grab_needle_plus_minus_y_ = GRASP_W_NEEDLE_POSITIVE_GRIPPER_Y;
@@ -106,8 +106,8 @@ NeedlePlanner::NeedlePlanner() {
     //put O and R0 into an affine for initial pose of needle w/rt tissue frame
     affine_init_needle_frame_wrt_tissue_.linear() = R0_needle_wrt_tissue_;
     affine_init_needle_frame_wrt_tissue_.translation() = O_needle_wrt_tissue_;
-    //ROS_INFO("INIT: initial affine_needle_frame_wrt_tissue_");
-    //print_affine(affine_init_needle_frame_wrt_tissue_);      
+    ROS_INFO("INIT: initial affine_needle_frame_wrt_tissue_");
+    print_affine(affine_init_needle_frame_wrt_tissue_);      
    
     //next two transforms are fixed during needle driving; they
     // describe how the needle is held by the gripper
@@ -118,11 +118,15 @@ NeedlePlanner::NeedlePlanner() {
      0, 1, 0,
      0, 0, 1; //identity; grasp frame is parallel to gripper frame, just offset in z
     affine_grasp_frame_wrt_gripper_frame_.linear() = R; // grasp frame aligned with gripper frame
+    affine_grasp2_frame_wrt_gripper2_frame_.linear() = R;
+
     Eigen::Vector3d O_grasp_frame;
     O_grasp_frame<<0, 0, -grasp_depth_;
     affine_grasp_frame_wrt_gripper_frame_.translation() = O_grasp_frame;
+    affine_grasp2_frame_wrt_gripper2_frame_.translation() = O_grasp_frame;
+
     ROS_INFO("FIXED: affine_grasp_frame_wrt_gripper_frame_");
-    print_affine(affine_grasp_frame_wrt_gripper_frame_); 
+    //print_affine(affine_grasp_frame_wrt_gripper_frame_); 
     
     // decide how to grab the needle, w/rt grasp frame; (changeable via "set" fnc)
     //default choice: needle origin in +y half space
@@ -132,9 +136,14 @@ NeedlePlanner::NeedlePlanner() {
     // with bvec_needle = +/- bvec_gripper, needle origin is either on +y-axis or -y-axis of grasp frame
  
     compute_grasp_transform();
-    R0_N_wrt_G_ = affine_needle_frame_wrt_gripper_frame_.linear(); 
+    // add by dlc
+    R0_N_wrt_Grasp_ = affine_needle_frame_wrt_grasp_frame_.linear();
+    O0_N_wrt_Grasp_ = affine_needle_frame_wrt_grasp_frame_.translation();
+
+    R0_N_wrt_G_ = affine_needle_frame_wrt_gripper_frame_.linear();
     O0_N_wrt_G_ = affine_needle_frame_wrt_gripper_frame_.translation();
-    
+ 
+        
     //hard-coded camera-to-base transform, useful for simple testing/debugging
        default_affine_lcamera_to_psm_one_.translation() << -0.155, -0.03265, 0.0;
         Eigen::Vector3d nvec, tvec, bvec;
@@ -156,6 +165,7 @@ void NeedlePlanner::compute_grasp_transform() {
     ROS_INFO("computing grasp transform: ");
    // with bvec_needle = +/- bvec_gripper, needle origin is either on +y-axis or -y-axis of grasp frame
     O_needle_frame_wrt_grasp_frame_<<0,grab_needle_plus_minus_y_*needle_radius_,0; 
+    
     bvec_needle_wrt_grasp_frame_<<0,0,grab_needle_plus_minus_z_; // DEFAULT: needle z axis is parallel to gripper z axis
     
     //--> rot gripper about +z gripper axis to insert needle
@@ -165,21 +175,30 @@ void NeedlePlanner::compute_grasp_transform() {
     // gripper and needle z axes are parallel or antiparallel (sign of grab_needle_plus_minus_z_)
     // needle origin is in + or - y half space of gripper frame (sign of grab_needle_plus_minus_y_)
     // grab the needle at phi_grab_, defined as 0 at center of needle, +pi/2 at tail of needle
-    nvec_needle_wrt_grasp_frame_(0) = grab_needle_plus_minus_z_*grab_needle_plus_minus_y_*cos(phi_grab_);
-    nvec_needle_wrt_grasp_frame_(1) = grab_needle_plus_minus_y_*sin(phi_grab_);
-    nvec_needle_wrt_grasp_frame_(2) = 0.0;
+   
+    //comment out by dlc 
+    //nvec_needle_wrt_grasp_frame_(0) = grab_needle_plus_minus_z_*grab_needle_plus_minus_y_*cos(phi_grab_);
+    //nvec_needle_wrt_grasp_frame_(1) = grab_needle_plus_minus_y_*sin(phi_grab_);
+    //nvec_needle_wrt_grasp_frame_(2) = 0.0;
+
+    // Add by DLC
+    nvec_needle_wrt_grasp_frame_<<0,grab_needle_plus_minus_y_,0;
+
     tvec_needle_wrt_grasp_frame_ = bvec_needle_wrt_grasp_frame_.cross(nvec_needle_wrt_grasp_frame_);
     
     R_needle_frame_wrt_grasp_frame_.col(0) = nvec_needle_wrt_grasp_frame_;
     R_needle_frame_wrt_grasp_frame_.col(1) = tvec_needle_wrt_grasp_frame_;
     R_needle_frame_wrt_grasp_frame_.col(2) = bvec_needle_wrt_grasp_frame_;
+   
     affine_needle_frame_wrt_grasp_frame_.linear() = R_needle_frame_wrt_grasp_frame_; 
     affine_needle_frame_wrt_grasp_frame_.translation() = O_needle_frame_wrt_grasp_frame_;
+    
     if(debug_needle_print) ROS_INFO("FIXED: affine_needle_frame_wrt_grasp_frame_");
     if(debug_needle_print) print_affine(affine_needle_frame_wrt_grasp_frame_);    
     affine_needle_frame_wrt_gripper_frame_ = affine_grasp_frame_wrt_gripper_frame_*affine_needle_frame_wrt_grasp_frame_;
     if(debug_needle_print) ROS_INFO("FIXED: affine_needle_frame_wrt_gripper_frame_");
-    if(debug_needle_print) print_affine(affine_needle_frame_wrt_gripper_frame_);      
+    if(debug_needle_print) print_affine(affine_needle_frame_wrt_gripper_frame_);  
+    //print_affine(affine_needle_frame_wrt_gripper_frame_);     
     
 }
 
@@ -201,14 +220,74 @@ void NeedlePlanner::compute_grasp_transform() {
 void  NeedlePlanner::compute_grasp_transform(double phi_x,double phi_y) {
     Eigen::Matrix3d R_N_wrt_G,Rx,Ry;
     Eigen::Vector3d O_N_wrt_G;
+    
+    Eigen::Matrix3d R_N_wrt_Grasp;
+    Eigen::Vector3d O_N_wrt_Grasp; 
+    
     Rx =  Rotx(phi_x);
-    Ry = Roty(phi_y);
-    R_N_wrt_G = Ry*Rx*R0_N_wrt_G_;
-    affine_needle_frame_wrt_gripper_frame_.linear() = R_N_wrt_G;
-    O_N_wrt_G = R_N_wrt_G*O0_N_wrt_G_;
-    affine_needle_frame_wrt_gripper_frame_.translation() = O_N_wrt_G;
+    Ry =  Roty(phi_y);
+    
+    // Comment out by DLC
+    // R_N_wrt_G = Ry*Rx*R0_N_wrt_G_;
+    // affine_needle_frame_wrt_gripper_frame_.linear() = R_N_wrt_G;
+    // O_N_wrt_G = R_N_wrt_G*O0_N_wrt_G_;
+    //affine_needle_frame_wrt_gripper_frame_.translation() = O_N_wrt_G;
+
+    R_N_wrt_Grasp = Rx*Ry*R0_N_wrt_Grasp_;
+    affine_needle_frame_wrt_grasp_frame_.linear() = R_N_wrt_Grasp;
+    
+    //Modified it by dlc according to Dr. Newman
+    //O_N_wrt_Grasp = R_N_wrt_Grasp*O0_N_wrt_Grasp_;
+    
+    O_N_wrt_Grasp = Rx*O0_N_wrt_Grasp_;
+   
+    affine_needle_frame_wrt_grasp_frame_.translation() = O_N_wrt_Grasp;
+    
+    if(debug_needle_print) ROS_INFO("FIXED: affine_needle_frame_wrt_grasp_frame_");
+    if(debug_needle_print) print_affine(affine_needle_frame_wrt_grasp_frame_);
+    
+    affine_needle_frame_wrt_gripper_frame_ = affine_grasp_frame_wrt_gripper_frame_*affine_needle_frame_wrt_grasp_frame_;
+    
     if(debug_needle_print) ROS_INFO("FIXED: affine_needle_frame_wrt_gripper_frame_");
-    if(debug_needle_print) print_affine(affine_needle_frame_wrt_gripper_frame_);  
+    if(debug_needle_print) print_affine(affine_needle_frame_wrt_gripper_frame_);
+   
+    
+}
+
+void  NeedlePlanner::compute_grasp2_transform(double phi_x,double phi_y) {
+    Eigen::Matrix3d R_N_wrt_G,Rx,Ry;
+    Eigen::Vector3d O_N_wrt_G;
+    
+    Eigen::Matrix3d R_N_wrt_Grasp;
+    Eigen::Vector3d O_N_wrt_Grasp; 
+    
+    Rx =  Rotx(phi_x);
+    Ry =  Roty(phi_y);
+    
+    // Comment out by DLC
+    // R_N_wrt_G = Ry*Rx*R0_N_wrt_G_;
+    // affine_needle_frame_wrt_gripper_frame_.linear() = R_N_wrt_G;
+    // O_N_wrt_G = R_N_wrt_G*O0_N_wrt_G_;
+    //affine_needle_frame_wrt_gripper_frame_.translation() = O_N_wrt_G;
+
+    R_N_wrt_Grasp = Rx*Ry*R0_N_wrt_Grasp_;
+    affine_needle_frame_wrt_grasp2_frame_.linear() = R_N_wrt_Grasp;
+    
+    //Modified it by dlc according to Dr. Newman
+    //O_N_wrt_Grasp = R_N_wrt_Grasp*O0_N_wrt_Grasp_;
+    
+    O_N_wrt_Grasp = Rx*O0_N_wrt_Grasp_;
+   
+    affine_needle_frame_wrt_grasp2_frame_.translation() = O_N_wrt_Grasp;
+    
+    ROS_INFO("FIXED: affine_needle_frame_wrt_grasp2_frame_");
+    print_affine(affine_needle_frame_wrt_grasp2_frame_);
+    
+    affine_needle_frame_wrt_gripper2_frame_ = affine_grasp2_frame_wrt_gripper2_frame_*affine_needle_frame_wrt_grasp2_frame_;
+    
+    ROS_INFO("FIXED: affine_needle_frame_wrt_gripper2_frame_");
+    print_affine(affine_needle_frame_wrt_gripper2_frame_);
+       
 }
 
 //function to compute affine_tissue_frame_wrt_camera_frame_
@@ -223,12 +302,13 @@ void NeedlePlanner::compute_tissue_frame_wrt_camera(Eigen::Vector3d entrance_pt,
     //set up tissue frame w/rt camera
     bvec_tissue_frame_wrt_camera_ = tissue_normal;
     nvec_tissue_frame_wrt_camera_ = (exit_pt - entrance_pt);
+    // DLC define -1 (exit_pt-entrance_pt) as switch entry to exit point and exits to entry.      
     //normalize this vector:
     double nvec_norm = nvec_tissue_frame_wrt_camera_.norm();
     if (nvec_norm< 0.001) {
         ROS_WARN("specified entrance and exit points are within 1mm; no path will be planned");
         return;
-    }
+    } 
     nvec_tissue_frame_wrt_camera_ = nvec_tissue_frame_wrt_camera_/nvec_norm;
     tvec_tissue_frame_wrt_camera_ = bvec_tissue_frame_wrt_camera_.cross(nvec_tissue_frame_wrt_camera_);
     repaired_exit_pt_ = entrance_pt + nvec_tissue_frame_wrt_camera_*dist_entrance_to_exit_;
@@ -238,13 +318,246 @@ void NeedlePlanner::compute_tissue_frame_wrt_camera(Eigen::Vector3d entrance_pt,
     affine_tissue_frame_wrt_camera_frame_.linear() = R_tissue_frame_wrt_camera_frame_;
     affine_tissue_frame_wrt_camera_frame_.translation() = entrance_pt;
     if(debug_needle_print) cout<<"FIXED: affine_tissue_frame_wrt_camera_frame_"<<endl;
-    if(debug_needle_print) print_affine(affine_tissue_frame_wrt_camera_frame_);    
+    if(debug_needle_print) print_affine(affine_tissue_frame_wrt_camera_frame_);
+    cout<<"FIXED: affine_tissue_frame_wrt_camera_frame_"<<endl;
+    print_affine(affine_tissue_frame_wrt_camera_frame_);    
     
 }
 
+
+void NeedlePlanner::compute_knottying_gripper_frame_wrt_camera(Eigen::Vector3d gripper1_motion, Eigen::Vector3d gripper2_motion, double dt){
+    
+    Eigen::Vector3d kt_p1, kt_p2, kt_r1n, kt_r2n, kt_r1b, kt_r2b;
+   
+    
+    ofstream outfile;
+ 
+    Eigen::Affine3d des_kt_gripper1_wrt_base1, des_kt_gripper2_wrt_base2;
+    
+    // TODO if vector of NE to NX is pointing to camera Y+ or Y- 
+    bvec_gripper1_frame_wrt_tissue_ << 0, -1, 0;
+    nvec_gripper1_frame_wrt_tissue_ << 0, 0, -1;
+    tvec_gripper1_frame_wrt_tissue_ = bvec_gripper1_frame_wrt_tissue_.cross(nvec_gripper1_frame_wrt_tissue_);
+            
+    R_gripper1_frame_wrt_tissue_frame_.col(0) = nvec_gripper1_frame_wrt_tissue_;
+    R_gripper1_frame_wrt_tissue_frame_.col(1) = tvec_gripper1_frame_wrt_tissue_;
+    R_gripper1_frame_wrt_tissue_frame_.col(2) = bvec_gripper1_frame_wrt_tissue_;
+
+    affine_kt_gripper1_frame_wrt_tissue_frame_.linear() = R_gripper1_frame_wrt_tissue_frame_;
+    affine_kt_gripper1_frame_wrt_tissue_frame_.translation() = gripper1_motion;
+
+    bvec_gripper2_frame_wrt_tissue_ << 0, 1, 0;
+    nvec_gripper2_frame_wrt_tissue_ << 0, 0, -1;
+    tvec_gripper2_frame_wrt_tissue_ = bvec_gripper2_frame_wrt_tissue_.cross(nvec_gripper2_frame_wrt_tissue_);
+            
+    R_gripper2_frame_wrt_tissue_frame_.col(0) = nvec_gripper2_frame_wrt_tissue_;
+    R_gripper2_frame_wrt_tissue_frame_.col(1) = tvec_gripper2_frame_wrt_tissue_;
+    R_gripper2_frame_wrt_tissue_frame_.col(2) = bvec_gripper2_frame_wrt_tissue_;
+
+    affine_kt_gripper2_frame_wrt_tissue_frame_.linear() = R_gripper2_frame_wrt_tissue_frame_;
+    affine_kt_gripper2_frame_wrt_tissue_frame_.translation() = gripper2_motion;
+
+
+    if(debug_needle_print) cout<<"FIXED: affine_kt_gripper1_frame_wrt_tissue_frame_"<<endl;
+    if(debug_needle_print) print_affine(affine_kt_gripper1_frame_wrt_tissue_frame_);
+    cout<<"FIXED: affine_kt_gripper1_frame_wrt_tissue_frame_"<<endl;
+    print_affine(affine_kt_gripper1_frame_wrt_tissue_frame_);  
+
+    affine_kt_gripper1_frame_wrt_camera_frame_ = 
+                affine_tissue_frame_wrt_camera_frame_*affine_kt_gripper1_frame_wrt_tissue_frame_;
+
+    if(debug_needle_print) cout<<"FIXED: affine_kt_gripper1_frame_wrt_camera_frame_"<<endl;
+    if(debug_needle_print) print_affine(affine_kt_gripper1_frame_wrt_camera_frame_);
+    cout<<"FIXED: affine_kt_gripper1_frame_wrt_camera_frame_"<<endl;
+    print_affine(affine_kt_gripper1_frame_wrt_camera_frame_);  
+
+    if(debug_needle_print) cout<<"FIXED: affine_kt_gripper2_frame_wrt_tissue_frame_"<<endl;
+    if(debug_needle_print) print_affine(affine_kt_gripper2_frame_wrt_tissue_frame_);
+    cout<<"FIXED: affine_kt_gripper2_frame_wrt_tissue_frame_"<<endl;
+    print_affine(affine_kt_gripper2_frame_wrt_tissue_frame_);  
+
+    affine_kt_gripper2_frame_wrt_camera_frame_ = 
+                affine_tissue_frame_wrt_camera_frame_*affine_kt_gripper2_frame_wrt_tissue_frame_;
+
+    if(debug_needle_print) cout<<"FIXED: affine_kt_gripper2_frame_wrt_camera_frame_"<<endl;
+    if(debug_needle_print) print_affine(affine_kt_gripper2_frame_wrt_camera_frame_);
+    cout<<"FIXED: affine_kt_gripper2_frame_wrt_camera_frame_"<<endl;
+    print_affine(affine_kt_gripper2_frame_wrt_camera_frame_);  
+    
+     // calculate knot-tying gripper 1 motion wrt base 1 for IK
+    des_kt_gripper1_wrt_base1 = default_affine_lcamera_to_psm_one_.inverse()*affine_kt_gripper1_frame_wrt_camera_frame_;
+    if(debug_needle_print) ROS_INFO("des_kt_gripper1_wrt_base1");
+    if(debug_needle_print) print_affine(des_kt_gripper1_wrt_base1);
+    
+    cout<<"FIXED: default_affine_lcamera_to_psm_one_"<<endl;
+    print_affine(default_affine_lcamera_to_psm_one_);      
+    cout<<"FIXED: des_kt_gripper1_wrt_base1"<<endl;
+    print_affine(des_kt_gripper1_wrt_base1);      
+    
+    // calculate knot-tying gripper 2 motion wrt base 2 for IK
+    des_kt_gripper2_wrt_base2 = default_affine_lcamera_to_psm_two_.inverse()*affine_kt_gripper2_frame_wrt_camera_frame_;
+    if(debug_needle_print) ROS_INFO("des_kt_gripper2_wrt_base2");
+    if(debug_needle_print) print_affine(des_kt_gripper2_wrt_base2);
+    
+    cout<<"FIXED: default_affine_lcamera_to_psm_two_"<<endl;
+    print_affine(default_affine_lcamera_to_psm_two_);      
+    cout<<"FIXED: des_kt_gripper2_wrt_base2"<<endl;
+    print_affine(des_kt_gripper2_wrt_base2);      
+
+
+    ROS_WARN("file opened");
+    outfile.open ("kt_trajectory.csp", std::ofstream::out | std::ofstream::app);   
+       
+        if (ik_solver_.ik_solve(des_kt_gripper1_wrt_base1) & ik_solver_.ik_solve(des_kt_gripper2_wrt_base2)) 
+        {  
+           ROS_WARN("ik ok"); 
+           
+            kt_p1  = des_kt_gripper1_wrt_base1.translation();
+            kt_r1n = des_kt_gripper1_wrt_base1.linear().col(0);
+            kt_r1b = des_kt_gripper1_wrt_base1.linear().col(2); 
+             
+            // kt_p1  = affine_kt_gripper1_frame_wrt_camera_frame_.translation();
+            // kt_r1n = affine_kt_gripper1_frame_wrt_camera_frame_.linear().col(0);
+            // kt_r1b = affine_kt_gripper1_frame_wrt_camera_frame_.linear().col(2);
+
+            // kt_p2  = affine_kt_gripper2_frame_wrt_camera_frame_.translation();
+            // kt_r2n = affine_kt_gripper2_frame_wrt_camera_frame_.linear().col(0);
+            // kt_r2b = affine_kt_gripper2_frame_wrt_camera_frame_.linear().col(2);
+
+            kt_p2  = des_kt_gripper2_wrt_base2.translation();
+            kt_r2n = des_kt_gripper2_wrt_base2.linear().col(0);
+            kt_r2b = des_kt_gripper2_wrt_base2.linear().col(2); 
+
+           outfile<<kt_p1(0)<<", "<<kt_p1(1)<<", "<<kt_p1(2)<<","<<kt_r1n(0)<<","<<kt_r1n(1)<<","<<kt_r1n(2)<<","<<kt_r1b(0)<<","<<kt_r1b(1)<<","<<kt_r1b(2)<<", 0, ";
+           outfile<<kt_p2(0)<<", "<<kt_p2(1)<<", "<<kt_p2(2)<<","<<kt_r2n(0)<<","<<kt_r2n(1)<<","<<kt_r2n(2)<<","<<kt_r2b(0)<<","<<kt_r2b(1)<<","<<kt_r2b(2)<<", 0, ";
+          
+           //outfile<<" 0, 0, 0, 1, 0, 0, 0, 0, -1,  0, ";
+           outfile<<dt<<endl;
+                
+         }
+         
+    outfile.close(); 
+    ROS_WARN("kt_Trajectory file closed");  
+ };
+
+void NeedlePlanner::compute_suturepull_gripper_frame_wrt_camera(Eigen::Vector3d gripper1_motion, Eigen::Vector3d gripper2_motion, Eigen::Vector3d bvec_g1_wrt_tissue, Eigen::Vector3d nvec_g1_wrt_tissue, Eigen::Vector3d bvec_g2_wrt_tissue, Eigen::Vector3d nvec_g2_wrt_tissue, double j1_open_close, double j2_open_close, double dt){
+    
+    Eigen::Vector3d sp_p1, sp_p2, sp_r1n, sp_r2n, sp_r1b, sp_r2b;
+       
+    ofstream outfile;
+ 
+    Eigen::Affine3d des_sp_gripper1_wrt_base1, des_sp_gripper2_wrt_base2;
+    
+    // TODO if vector of NE to NX is pointing to camera Y+ or Y- 
+    bvec_gripper1_frame_wrt_tissue_ = bvec_g1_wrt_tissue;
+    nvec_gripper1_frame_wrt_tissue_ = nvec_g1_wrt_tissue;
+    tvec_gripper1_frame_wrt_tissue_ = bvec_gripper1_frame_wrt_tissue_.cross(nvec_gripper1_frame_wrt_tissue_);
+            
+    R_gripper1_frame_wrt_tissue_frame_.col(0) = nvec_gripper1_frame_wrt_tissue_;
+    R_gripper1_frame_wrt_tissue_frame_.col(1) = tvec_gripper1_frame_wrt_tissue_;
+    R_gripper1_frame_wrt_tissue_frame_.col(2) = bvec_gripper1_frame_wrt_tissue_;
+
+    affine_sp_gripper1_frame_wrt_tissue_frame_.linear() = R_gripper1_frame_wrt_tissue_frame_;
+    affine_sp_gripper1_frame_wrt_tissue_frame_.translation() = gripper1_motion;
+
+    bvec_gripper2_frame_wrt_tissue_ = bvec_g2_wrt_tissue;
+    nvec_gripper2_frame_wrt_tissue_ = nvec_g2_wrt_tissue;;
+    tvec_gripper2_frame_wrt_tissue_ = bvec_gripper2_frame_wrt_tissue_.cross(nvec_gripper2_frame_wrt_tissue_);
+            
+    R_gripper2_frame_wrt_tissue_frame_.col(0) = nvec_gripper2_frame_wrt_tissue_;
+    R_gripper2_frame_wrt_tissue_frame_.col(1) = tvec_gripper2_frame_wrt_tissue_;
+    R_gripper2_frame_wrt_tissue_frame_.col(2) = bvec_gripper2_frame_wrt_tissue_;
+
+    affine_sp_gripper2_frame_wrt_tissue_frame_.linear() = R_gripper2_frame_wrt_tissue_frame_;
+    affine_sp_gripper2_frame_wrt_tissue_frame_.translation() = gripper2_motion;
+
+
+    if(debug_needle_print) cout<<"FIXED: affine_sp_gripper1_frame_wrt_tissue_frame_"<<endl;
+    if(debug_needle_print) print_affine(affine_sp_gripper1_frame_wrt_tissue_frame_);
+    cout<<"FIXED: affine_sp_gripper1_frame_wrt_tissue_frame_"<<endl;
+    print_affine(affine_sp_gripper1_frame_wrt_tissue_frame_);  
+
+    affine_sp_gripper1_frame_wrt_camera_frame_ = 
+                affine_tissue_frame_wrt_camera_frame_*affine_sp_gripper1_frame_wrt_tissue_frame_;
+
+    if(debug_needle_print) cout<<"FIXED: affine_sp_gripper1_frame_wrt_camera_frame_"<<endl;
+    if(debug_needle_print) print_affine(affine_sp_gripper1_frame_wrt_camera_frame_);
+    cout<<"FIXED: affine_sp_gripper1_frame_wrt_camera_frame_"<<endl;
+    print_affine(affine_sp_gripper1_frame_wrt_camera_frame_);  
+
+    if(debug_needle_print) cout<<"FIXED: affine_sp_gripper2_frame_wrt_tissue_frame_"<<endl;
+    if(debug_needle_print) print_affine(affine_sp_gripper2_frame_wrt_tissue_frame_);
+    cout<<"FIXED: affine_sp_gripper2_frame_wrt_tissue_frame_"<<endl;
+    print_affine(affine_sp_gripper2_frame_wrt_tissue_frame_);  
+
+    affine_sp_gripper2_frame_wrt_camera_frame_ = 
+                affine_tissue_frame_wrt_camera_frame_*affine_sp_gripper2_frame_wrt_tissue_frame_;
+
+    if(debug_needle_print) cout<<"FIXED: affine_sp_gripper2_frame_wrt_camera_frame_"<<endl;
+    if(debug_needle_print) print_affine(affine_sp_gripper2_frame_wrt_camera_frame_);
+    cout<<"FIXED: affine_sp_gripper2_frame_wrt_camera_frame_"<<endl;
+    print_affine(affine_sp_gripper2_frame_wrt_camera_frame_);  
+    
+     // calculate knot-tying gripper 1 motion wrt base 1 for IK
+    des_sp_gripper1_wrt_base1 = default_affine_lcamera_to_psm_one_.inverse()*affine_sp_gripper1_frame_wrt_camera_frame_;
+    if(debug_needle_print) ROS_INFO("des_sp_gripper1_wrt_base1");
+    if(debug_needle_print) print_affine(des_sp_gripper1_wrt_base1);
+    
+    cout<<"FIXED: default_affine_lcamera_to_psm_one_"<<endl;
+    print_affine(default_affine_lcamera_to_psm_one_);      
+    cout<<"FIXED: des_sp_gripper1_wrt_base1"<<endl;
+    print_affine(des_sp_gripper1_wrt_base1);      
+    
+    // calculate knot-tying gripper 2 motion wrt base 2 for IK
+    des_sp_gripper2_wrt_base2 = default_affine_lcamera_to_psm_two_.inverse()*affine_sp_gripper2_frame_wrt_camera_frame_;
+    if(debug_needle_print) ROS_INFO("des_sp_gripper2_wrt_base2");
+    if(debug_needle_print) print_affine(des_sp_gripper2_wrt_base2);
+    
+    cout<<"FIXED: default_affine_lcamera_to_psm_two_"<<endl;
+    print_affine(default_affine_lcamera_to_psm_two_);      
+    cout<<"FIXED: des_sp_gripper2_wrt_base2"<<endl;
+    print_affine(des_sp_gripper2_wrt_base2);      
+
+
+    ROS_WARN("file opened");
+    outfile.open ("sp_trajectory.csp", std::ofstream::out | std::ofstream::app);   
+       
+        if (ik_solver_.ik_solve(des_sp_gripper1_wrt_base1) & ik_solver_.ik_solve(des_sp_gripper2_wrt_base2)) 
+        {  
+           ROS_WARN("ik ok"); 
+           
+            sp_p1  = des_sp_gripper1_wrt_base1.translation();
+            sp_r1n = des_sp_gripper1_wrt_base1.linear().col(0);
+            sp_r1b = des_sp_gripper1_wrt_base1.linear().col(2); 
+             
+            // sp_p1  = affine_sp_gripper1_frame_wrt_camera_frame_.translation();
+            // sp_r1n = affine_sp_gripper1_frame_wrt_camera_frame_.linear().col(0);
+            // sp_r1b = affine_sp_gripper1_frame_wrt_camera_frame_.linear().col(2);
+
+            // sp_p2  = affine_sp_gripper2_frame_wrt_camera_frame_.translation();
+            // sp_r2n = affine_sp_gripper2_frame_wrt_camera_frame_.linear().col(0);
+            // sp_r2b = affine_sp_gripper2_frame_wrt_camera_frame_.linear().col(2);
+
+            sp_p2  = des_sp_gripper2_wrt_base2.translation();
+            sp_r2n = des_sp_gripper2_wrt_base2.linear().col(0);
+            sp_r2b = des_sp_gripper2_wrt_base2.linear().col(2); 
+
+           outfile<<sp_p1(0)<<", "<<sp_p1(1)<<", "<<sp_p1(2)<<","<<sp_r1n(0)<<","<<sp_r1n(1)<<","<<sp_r1n(2)<<","<<sp_r1b(0)<<","<<sp_r1b(1)<<","<<sp_r1b(2)<<","<<j1_open_close<<", ";
+           outfile<<sp_p2(0)<<", "<<sp_p2(1)<<", "<<sp_p2(2)<<","<<sp_r2n(0)<<","<<sp_r2n(1)<<","<<sp_r2n(2)<<","<<sp_r2b(0)<<","<<sp_r2b(1)<<","<<sp_r2b(2)<<","<<j2_open_close<<",";
+          
+           //outfile<<" 0, 0, 0, 1, 0, 0, 0, 0, -1,  0, ";
+           outfile<<dt<<endl;
+                
+         }
+         
+    outfile.close(); 
+    ROS_WARN("sp_Trajectory file closed");  
+ };
+
+
 //main fnc: 
 // Return a vector full of affines describing desired gripper frames w/rt camera frame
-void NeedlePlanner::compute_needle_drive_gripper_affines(vector <Eigen::Affine3d> &gripper_affines_wrt_camera) {
+void NeedlePlanner::compute_needle_drive_gripper_affines(vector <Eigen::Affine3d> &gripper_affines_wrt_camera, vector <Eigen::Affine3d>&gripper2_affines_wrt_camera, Eigen::VectorXi &ik_ok_array, int &ik_score) {
     
 
     //must first compute the tissue frame and its transform w/rt camera frame
@@ -260,11 +573,19 @@ void NeedlePlanner::compute_needle_drive_gripper_affines(vector <Eigen::Affine3d
     // take the needle-frame R_needle_wrt_tissue, and rotate it about the tissue-frame y-axis
     // keep the needle origin constant
     
-   //next two are variable, as the needle is inserted:
+    //next two are variable, as the needle is inserted:
     //initialize consistent insertion angle and initial pose of needle w/rt tissue;
     // these values will change during needle driving:
+    
+    Eigen::Affine3d des_gripper1_wrt_base, des_gripper2_wrt_base;
+    
+    Eigen::Vector3d p1, r1, r2, p2, r12, r22;
+    ofstream outfile;
+
     phi_insertion_ = 0.0; //start drive from here   
-    affine_needle_frame_wrt_tissue_ = affine_init_needle_frame_wrt_tissue_;     
+    
+    affine_needle_frame_wrt_tissue_ = affine_init_needle_frame_wrt_tissue_; 
+   
     
     //version for 90-deg drive only ********
     double dphi = M_PI/(2.0*(NSAMPS_DRIVE_PLAN-1));  //M_PI/(NSAMPS_DRIVE_PLAN-1);
@@ -285,9 +606,21 @@ void NeedlePlanner::compute_needle_drive_gripper_affines(vector <Eigen::Affine3d
     affine_needle_frame_wrt_tissue_.translation() = Rotx(psi_needle_axis_tilt_wrt_tissue_)*needle_origin;
     if(debug_needle_print) cout<<affine_needle_frame_wrt_tissue_.linear()<<endl;
 
-    for (int ipose=0;ipose<NSAMPS_DRIVE_PLAN;ipose++) {
+    ROS_WARN("file opened");
+    outfile.open ("new_trajectory.csp");
+        
+    double t=2; 
+    int nsolns = 0;
+    int ik_index = 0;
+    ik_ok_array.setZero();
+    gripper_affines_wrt_camera.clear();
+    gripper2_affines_wrt_camera.clear();
+   
+    //for (int ipose=0;ipose<NSAMPS_DRIVE_PLAN;ipose++) {
+    for (int ipose=0;ipose<40;ipose++) {
         //Roty_needle = Roty(-phi_insertion_); //rotate about tissue-frame -y axis
         //more general--allow any needle z axis:
+        
         Rot_needle = Rot_k_phi(kvec_needle,phi_insertion_);
         //R_needle_wrt_tissue_ = Roty_needle*R0_needle_wrt_tissue_; //update rotation of needle drive
         R_needle_wrt_tissue_ = Rot_needle*R0_needle_wrt_tissue_; //update rotation of needle drive
@@ -301,6 +634,9 @@ void NeedlePlanner::compute_needle_drive_gripper_affines(vector <Eigen::Affine3d
         
         affine_gripper_frame_wrt_tissue_ = 
                  affine_needle_frame_wrt_tissue_*affine_needle_frame_wrt_gripper_frame_.inverse();
+        affine_gripper2_frame_wrt_tissue_ = 
+                 affine_needle_frame_wrt_tissue_*affine_needle_frame_wrt_gripper2_frame_.inverse();
+   
         if(debug_needle_print) ROS_INFO("affine_gripper_frame_wrt_tissue_");
         if(debug_needle_print) print_affine(affine_gripper_frame_wrt_tissue_);
         
@@ -310,17 +646,120 @@ void NeedlePlanner::compute_needle_drive_gripper_affines(vector <Eigen::Affine3d
         
         affine_gripper_frame_wrt_camera_frame_ = 
                 affine_tissue_frame_wrt_camera_frame_*affine_gripper_frame_wrt_tissue_;
+        affine_gripper2_frame_wrt_camera_frame_ = 
+                affine_tissue_frame_wrt_camera_frame_*affine_gripper2_frame_wrt_tissue_;
 
 
         if(debug_needle_print) ROS_INFO("affine_gripper_frame_wrt_camera_frame_");
         if(debug_needle_print) print_affine(affine_gripper_frame_wrt_camera_frame_);        
-        gripper_affines_wrt_camera.push_back(affine_gripper_frame_wrt_camera_frame_);
+       
+
+        des_gripper1_wrt_base = default_affine_lcamera_to_psm_one_.inverse()*affine_gripper_frame_wrt_camera_frame_;
+        des_gripper2_wrt_base = default_affine_lcamera_to_psm_two_.inverse()*affine_gripper2_frame_wrt_camera_frame_;
+
+        if(debug_needle_print) ROS_INFO("des_gripper2_wrt_base");
+        if(debug_needle_print) print_affine(des_gripper2_wrt_base);
         
-                phi_insertion_+=dphi; 
+       
+       
+        if (ik_solver_.ik_solve(des_gripper1_wrt_base)) 
+        {  nsolns++;
+           cout<<ipose<<",";
+           gripper_affines_wrt_camera.push_back(affine_gripper_frame_wrt_camera_frame_);
+        
+           ik_ok_array(ik_index) = 1;
+
+        }
+        ik_index++;
+        
+        p1 = des_gripper1_wrt_base.translation();
+        r1 = des_gripper1_wrt_base.linear().col(0);
+        r2 = des_gripper1_wrt_base.linear().col(2); 
+
+
+        if (ik_solver_.ik_solve(des_gripper2_wrt_base)) 
+        {  
+           cout<<ipose<<",";
+           gripper2_affines_wrt_camera.push_back(affine_gripper2_frame_wrt_camera_frame_);
+           //print_affine(des_gripper2_wrt_base);
+        }
+        p2  = des_gripper2_wrt_base.translation();
+        r12 = des_gripper2_wrt_base.linear().col(0);
+        r22 = des_gripper2_wrt_base.linear().col(2); 
+
+
+
+        //p1 = affine_gripper_frame_wrt_camera_frame_.translation();
+        //r1 = affine_gripper_frame_wrt_camera_frame_.linear().col(0);
+        //r2 =affine_gripper_frame_wrt_camera_frame_.linear().col(2);
+
+        outfile<<p1(0)<<", "<<p1(1)<<", "<<p1(2)<<","<<r1(0)<<","<<r1(1)<<","<<r1(2)<<","<<r2(0)<<","<<r2(1)<<","<<r2(2)<<", 0.2, ";
+        outfile<<p2(0)<<", "<<p2(1)<<", "<<p2(2)<<","<<r12(0)<<","<<r12(1)<<","<<r12(2)<<","<<r22(0)<<","<<r22(1)<<","<<r22(2)<<", 0.2, ";
+
+
+        //outfile<<" 0, 0, -0.050, 0, 1, 0, 0, 0, -1,  0, ";
+        outfile<<t<<endl;
+        //outfile<<" 0.017, 0, 0.020, -0.706967, -0.707247, 0, 0, 0, 1,  0.0, ";
+        
+        t+=0.5;
+        phi_insertion_+=dphi; 
     }
     //compute gripper from from needle frame, in camera coords
     //push this frame on the vector gripper_affines_wrt_camera
     // repeat for angles phi_insertion_ from 0 to pi
+   
+    outfile.close(); 
+    ROS_WARN("New Trajectory file closed");  
+    
+    //cout<<"done"<<endl;
+    //cout<<"ik_ok_point: "<<ik_ok_array.transpose()<<endl;
+    
+    bool start_count;
+    int score = 0;
+    int start_index=0;
+    int stop_index=0;
+   
+    // Score
+    // 1. Number of points must greater than or equal to 32 (nposes >= 32) 
+    // 2. No interruption in between points
+    // 3. Points near 40 get higher score 
+    
+   
+    if(ik_ok_array.sum() >= 32){
+      
+      start_count = false;
+      
+     for (int array_index = 39; array_index>0; array_index-=1){
+    
+        if((ik_ok_array(array_index)==1) && (start_count==false)){
+          start_count=true;
+          start_index=array_index;
+        }
+        
+        if((ik_ok_array(array_index)==0) && (start_count==true)){
+          start_count==false; 
+          stop_index=array_index;
+          array_index=0;
+        }  
+     
+        if(start_count==true) score=score+array_index;  
+      
+    }  
+    
+    if((stop_index)>(start_index-32)) score=0;    
+   
+    }
+    
+    if((ik_ok_array.sum() >= 15) && (ik_ok_array.sum() < 32)){
+       score = 120;  
+    }
+
+    
+    ik_score=score;
+    cout<<"Start: "<< start_index<<endl;
+    cout<<"Stop: "<< stop_index<<endl;
+    cout<<"score: "<<ik_score<<endl;
+
 }
 
 //simple version: don't worry about tissue frame--and assumes affines will be expressed w/rt psm1_base frame;
@@ -391,49 +830,88 @@ void NeedlePlanner::simple_compute_needle_drive_gripper_affines(vector <Eigen::A
 // point horizontal (parallel to tissue) at angle kvec_yaw (from the x-axis)
 // needle center is at O_needle, and needle radius is r_needle
 // all poses are w/rt camera frame
-void NeedlePlanner::simple_horiz_kvec_motion(Eigen::Vector3d O_needle, double r_needle, double kvec_yaw, vector <Eigen::Affine3d> &gripper_affines_wrt_camera) {
+void NeedlePlanner::simple_horiz_kvec_motion(Eigen::Vector3d O_needle, double r_needle, double kvec_yaw, vector <Eigen::Affine3d> &gripper_affines_wrt_camera, Eigen::VectorXi &ik_ok_array, int &ik_score) {
 
     //double phi_circle = 0.0;
+    // DLC needle grasp angle  
+    double grasp_angle_1;
+    
     double dphi = M_PI/40.0;
-    Eigen::Matrix3d R,R0;
-    Eigen::Vector3d nvec,tvec,bvec,bvec0,tip_pos;
+    Eigen::Matrix3d R,R0,R0t;
+    Eigen::Vector3d nvec,tvec,tvect,bvec,bvec0,bvect,tip_pos;
     Eigen::Affine3d des_gripper1_wrt_base;
+
     bvec0<<1,0,0;//at kvec_yaw=0, set needle axis parallel to camera-frame x-axis
+    
     //nvec<<-1,0,0;
     //bvec<<1,0,0;
     nvec<<0,0,-1;  //start w/ gripper x axis pointing "up" towards camera 
+               
     bvec = Rotz(kvec_yaw)*bvec0; //rotate the needle axis about camera z-axis
+    
     //cout<<"needle z-vec in camera frame: "<<bvec.transpose()<<endl;
-            
+                
     tvec = bvec.cross(nvec);
     R0.col(0) = nvec;
     R0.col(1) = tvec;
     R0.col(2) = bvec;
+    // DLC negative rotation
     tip_pos=O_needle - r_needle*tvec;
+    
+    // DLC positive rotation
+    //tip_pos=O_needle + r_needle*tvec;
+    
+       
+    cout << "tip_pos = " << tip_pos.transpose() << endl;
     affine_gripper_frame_wrt_camera_frame_.translation() = tip_pos;
     affine_gripper_frame_wrt_camera_frame_.linear()=R0;
+    print_affine(affine_gripper_frame_wrt_camera_frame_);
+        
     //cout<<"start gripper1 orientation: "<<endl;
-    //cout<<affine_gripper_frame_wrt_camera_frame_.linear()<<endl;
+    cout<<affine_gripper_frame_wrt_camera_frame_.linear()<<endl;
     //cout<<"needle tip: "<<affine_gripper_frame_wrt_camera_frame_.translation().transpose()<<endl;
     gripper_affines_wrt_camera.clear();
+    
+    // Add by DLC
+    ik_ok_array.setZero();
+     
     int nsolns=0;
     int nphi=0;
+       
+    //add by dlc 05-26-2016
+    int ik_index = 0;
+
     cout<<"nphi: ";
-    for (double phi = 0.0; phi< M_PI; phi+=dphi) {
+    
+    // needle nagative rotation  
+    // phi < M_PI; phi+=dphi
+    
+    // needle positive rotation
+    // phi> -M_PI; phi-=dphi
+
+    for (double phi = 0.0; phi < M_PI; phi+=dphi) {
         //need to rotate gripper frame about camera-frame x-axis;
         // DO want to describe this as equiv rotation about gripper-frame z-axis
-        
+        cout<<"phi: "<<phi<<endl;
         //careful here: R0 is R_gripper/camera
         // rotate about the camera-frame x-axis;
         // more generally, rotate about k_vec, expressed in camera coords
         //R = Rotx(phi)*R0; //Rot_k_phi(bvec, phi)*R0;
         R = Rot_k_phi(bvec, phi)*R0;
+       
         //cout<<"Rotx(phi):"<<endl;
         //cout<<Rotx(phi)<<endl;
         //cout<<"Rot_k_phi(bvec,phi):"<<endl;
         //cout<<Rot_k_phi(bvec,phi)<<endl;
         affine_gripper_frame_wrt_camera_frame_.linear()=R;
+        
+        // DLC needle negative rotation
         tip_pos=O_needle - r_needle*R.col(1); // assumes needle x-axis is parallel to gripper y axis
+        
+        // DLC needle positive rotation       
+        //tip_pos=O_needle + r_needle*R.col(1);
+
+        cout << "tip_pos = " << tip_pos.transpose() << endl; 
         affine_gripper_frame_wrt_camera_frame_.translation() = tip_pos;
         //cout<<"gripper1 orientation at phi = "<<phi<<endl;
         //cout<<affine_gripper_frame_wrt_camera_frame_.linear()<<endl;
@@ -444,6 +922,8 @@ void NeedlePlanner::simple_horiz_kvec_motion(Eigen::Vector3d O_needle, double r_
         //cin>>ans;
         //express in psm base frame
         des_gripper1_wrt_base = default_affine_lcamera_to_psm_one_.inverse()*affine_gripper_frame_wrt_camera_frame_;
+        cout<<des_gripper1_wrt_base.linear()<<endl;
+        cout<<des_gripper1_wrt_base.translation()<<endl;
         //try computing IK:
         //cout<<"phi = "<<phi;
         if (ik_solver_.ik_solve(des_gripper1_wrt_base)) 
@@ -451,12 +931,67 @@ void NeedlePlanner::simple_horiz_kvec_motion(Eigen::Vector3d O_needle, double r_
            cout<<nphi<<",";
            //cout<<":  found IK; nsolns = "<<nsolns<<endl;
            gripper_affines_wrt_camera.push_back(affine_gripper_frame_wrt_camera_frame_);
+        
+        //add by dlc 05-26-2016  
+           ik_ok_array(ik_index) = 1;
+
         }
         nphi++;
+        ik_index++;
+        
         //else cout<<";  NO IK"<<endl;
      
     }
-    cout<<endl;
+    cout<<"done"<<endl;
+    //add by dlc 05-26-2016
+    cout<<"ik_ok_point: "<<ik_ok_array.transpose()<<endl;
+    
+  
+    bool start_count;
+    int score = 0;
+    int start_index=0;
+    int stop_index=0;
+   
+    // Score
+    // 1. Number of points must greater than or equal to 32 (nposes >= 32) 
+    // 2. No interruption in between points
+    // 3. Points near 40 get higher score 
+    
+   
+    if(ik_ok_array.sum() >= 32){
+      
+      start_count = false;
+      
+     for (int array_index = 39; array_index>0; array_index-=1){
+    
+        if((ik_ok_array(array_index)==1) && (start_count==false)){
+          start_count=true;
+          start_index=array_index;
+        }
+        
+        if((ik_ok_array(array_index)==0) && (start_count==true)){
+          start_count==false; 
+          stop_index=array_index;
+          array_index=0;
+        }  
+     
+        if(start_count==true) score=score+array_index;  
+      
+    }  
+    
+    if((stop_index)>(start_index-32)) score=0;    
+   
+    }
+    
+    if((ik_ok_array.sum() >= 15) && (ik_ok_array.sum() < 32)){
+       score = 120;  
+    }
+
+    
+    ik_score=score;
+    //cout<<"Start: "<< start_index<<endl;
+    //cout<<"Stop: "<< stop_index<<endl;
+    //cout<<"score: "<<ik_score<<endl;
 }
 
 void NeedlePlanner::simple_horiz_kvec_motion_psm2(Eigen::Vector3d O_needle, double r_needle, double kvec_yaw, vector <Eigen::Affine3d> &gripper_affines_wrt_camera) {
@@ -485,7 +1020,7 @@ void NeedlePlanner::simple_horiz_kvec_motion_psm2(Eigen::Vector3d O_needle, doub
     //cout<<"needle tip: "<<affine_gripper_frame_wrt_camera_frame_.translation().transpose()<<endl;
     gripper_affines_wrt_camera.clear();
     int nsolns=0;
-    for (double phi = 0.0; phi> -M_PI; phi-=dphi) {
+    for (double phi = 0.0; phi> -M_PI-0.2; phi-=dphi) {
         //need to rotate gripper frame about camera-frame x-axis;
         // DO want to describe this as equiv rotation about gripper-frame z-axis
         
@@ -690,7 +1225,7 @@ void NeedlePlanner::write_needle_drive_affines_to_file(vector <Eigen::Affine3d> 
     //bvec2<<0,0,1;
      
     double t=4; 
-    double dt= 1.0; //time step between poses
+    double dt= 0.3; //time step between poses
     for (int i=0;i<nposes;i++) {
         Origin = gripper_affines_wrt_camera[i].translation();
         outfile<<Origin(0)<<", "<<Origin(1)<<", "<<Origin(2)<<",     ";
@@ -698,7 +1233,7 @@ void NeedlePlanner::write_needle_drive_affines_to_file(vector <Eigen::Affine3d> 
         nvec= R.col(0);
         bvec= R.col(2);
         outfile<<nvec(0)<<", "<<nvec(1)<<", "<<nvec(2)<<",     ";
-        outfile<<bvec(0)<<", "<<bvec(1)<<", "<<bvec(2)<<",  0,   ";
+        outfile<<bvec(0)<<", "<<bvec(1)<<", "<<bvec(2)<<",  0.15,   ";
         //now, gripper 2:
         /*
         outfile<<gripper2_pre_grasp_origin(0)<<", "<<gripper2_pre_grasp_origin(1)<<", "<<gripper2_pre_grasp_origin(2)<<",     ";
@@ -776,7 +1311,8 @@ void NeedlePlanner::write_psm2_needle_drive_affines_to_file(Eigen::Affine3d grip
     bvec2<<0,0,1;
     
     double t=4; 
-    double dt= 1.0; //time step between poses
+    // adjust dt to change needle-drive speed
+    double dt= 0.3; //time step between poses
     for (int i=0;i<nposes;i++) {
         Origin = psm2_gripper_affines_wrt_camera[i].translation();
         outfile<<Origin(0)<<", "<<Origin(1)<<", "<<Origin(2)<<",     ";

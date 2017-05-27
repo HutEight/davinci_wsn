@@ -46,11 +46,16 @@ int main(int argc, char** argv)
     //cout<<"enter kvec_yaw: (e.g. 0-2pi): ";
     //cin>>kvec_yaw;
     vector <Eigen::Affine3d> gripper_affines_wrt_camera;  //put answers here 
+
+    Eigen::VectorXi ik_ok_array(40); //Add by DLC 5-26-2016 also in test_main, test_main_v3
+    int ik_score = 0;    
+
     vector <geometry_msgs::Point> exit_points;
     geometry_msgs::Point exitPoint;
     double needle_x,needle_y;
     Eigen::Vector3d v_entrance_to_exit,v_entrance_to_exit0;
     v_entrance_to_exit0<<0,-1,0; // corresponds to chosen needle kvec along 1,0,0
+
 
     ROS_INFO("main: instantiating an object of type NeedlePlanner");
     NeedlePlanner needlePlanner;  
@@ -64,7 +69,9 @@ int main(int argc, char** argv)
             cout<<"O_exit_pt = "<<O_exit_pt.transpose()<<endl;
         gripper_affines_wrt_camera.clear();
 
-        needlePlanner.simple_horiz_kvec_motion(O_needle, r_needle, kvec_yaw, gripper_affines_wrt_camera);
+        needlePlanner.simple_horiz_kvec_motion(O_needle, r_needle, kvec_yaw, gripper_affines_wrt_camera, ik_ok_array, ik_score);
+        //Add by DLC 5-26-2016 also in test_main, test_main_v3
+        
         int nposes = gripper_affines_wrt_camera.size();
         ROS_WARN("at kvec_yaw = %f, computed %d needle-drive gripper poses ",kvec_yaw,nposes);
         if (nposes>=40)  {

@@ -15,6 +15,12 @@
  */
 #include <needle_planner/needle_planner.h>
 #include <geometry_msgs/Polygon.h>
+#include "std_msgs/MultiArrayLayout.h"
+#include "std_msgs/MultiArrayDimension.h"
+#include "std_msgs/Int32MultiArray.h"
+#include <iostream>
+#include <fstream>
+
 const int g_npts_good=32;
 
 Eigen::Affine3d g_affine_lcamera_to_psm_one, g_affine_lcamera_to_psm_two; //, affine_gripper_wrt_base;
@@ -163,6 +169,8 @@ int main(int argc, char** argv) {
     ros::init(argc, argv, "needle_planner_test_main"); //node name
     ros::NodeHandle nh; // create a node handle; need to pass this to the class constructor
     ros::Publisher exit_pt_publisher = nh.advertise<geometry_msgs::Point>("exit_points", 1);
+    //ros::Publisher exit_pt_score_publisher = nh.advertise<geometry_msgs::Polygon>("exit_points_score", 1);
+    ros::Publisher exit_pt_score_publisher = nh.advertise<std_msgs::Int32MultiArray>("exit_points_score", 1);
     ros::Publisher exit_pt_array_publisher = nh.advertise<geometry_msgs::Polygon>("exit_point_array", 1);    
     ros::Subscriber thePoint = nh.subscribe("/thePoint", 1, inPointCallback);
 
@@ -171,7 +179,13 @@ int main(int argc, char** argv) {
     Eigen::Vector3d O_exit_pt;
     double x_entrance, y_entrance;
     geometry_msgs::Polygon polygon_msg;
-
+    
+    // Added by DLC
+    //geometry_msgs::Polygon exit_pts_score;
+    std_msgs::Int32MultiArray exit_pts_score;
+    ofstream outfile;
+  
+ 
     /*
     cout<<"using tissue z = "<<z_tissue<<endl; 
 
@@ -189,13 +203,33 @@ int main(int argc, char** argv) {
     //O_needle<< -0.02,0.004,0.1578; //we can hard-code O_needle(2) (z-value) for known tissue height
      */
 
-    vector <Eigen::Affine3d> gripper_affines_wrt_camera; //put answers here 
+    vector <Eigen::Affine3d> gripper_affines_wrt_camera; //put answers here
+    vector <Eigen::Affine3d> gripper2_affines_wrt_camera;
+    
+    Eigen::Vector3d gripper1_motion;
+    Eigen::Vector3d gripper2_motion;
+  
+   
+    Eigen::VectorXi ik_ok_array(40); //Add by DLC 5-26-2016 also in test_main, test_main_v2
+    int ik_score=0;
+
     vector <geometry_msgs::Point> exit_points;
     geometry_msgs::Point exitPoint;
     geometry_msgs::Point32 p32;
-    double needle_x, needle_y;
-    Eigen::Vector3d v_entrance_to_exit, v_entrance_to_exit0;
-    v_entrance_to_exit0 << 0, -1, 0; // corresponds to chosen needle kvec along 1,0,0
+   
+    // Add by DLC
+    //geometry_msgs::Point32 pscore;
+    
+
+    double needle_x, needle_y, needle_x2, needle_y2;;
+
+    Eigen::Vector3d v_entrance_to_exit, v_entrance_to_exit0, tissue_normal;
+    
+    tissue_normal << 0, 0, -1;
+    
+    v_entrance_to_exit0 << 0, -1, 0; 
+    // The vector is anti parallel to camera Y when kvec is zero
+  
 
     ROS_INFO("main: instantiating an object of type NeedlePlanner");
     NeedlePlanner needlePlanner;
@@ -205,41 +239,279 @@ int main(int argc, char** argv) {
     needlePlanner.set_affine_lcamera_to_psm_two(g_affine_lcamera_to_psm_two);   
     
     while (ros::ok()) {
+
+       
         if (g_got_new_entry_point) {
             g_got_new_entry_point = false;
+
+
+        // For needle driving, set need_x as desire grasping, then set Kve_yaw for one exit point
+            
+           for (needle_x = 0; needle_x < 0.1; needle_x += 0.7854){   
+             
+             ROS_WARN("file opened");
+             outfile.open ("entry_exit_points_coords.txt", std::ofstream::out | std::ofstream::app);
+            
             polygon_msg.points.clear();
+            exit_pts_score.data.clear();
+          
+           
             double kvec_yaw = 0.0; // rotation of needle z-axis w/rt camera x-axis
 
                 O_entrance_pt = g_O_entry_point;
-            //compute the tissue frame in camera coords, based on point-cloud selections:
-            for (kvec_yaw = 0.0; kvec_yaw < 6.28; kvec_yaw += 0.1) {
+            
+             
+    
+            //compute the tissue frame in camera coords, based0 on point-cloud selections, when test use 0.1, normal 6.28:
+            for (kvec_yaw = 0; kvec_yaw < 6.28; kvec_yaw += 0.1) {
                 v_entrance_to_exit = needlePlanner.Rotz(kvec_yaw) * v_entrance_to_exit0; //rotate the needle axis about camera z-axis
                 O_exit_pt = O_entrance_pt + d_to_exit_pt*v_entrance_to_exit;
                 O_needle = 0.5 * (O_exit_pt + O_entrance_pt);
                 O_needle(2) -= needle_height_above_tissue;
+                cout << "O_entrance_pt = " << O_entrance_pt.transpose() << endl;
                 cout << "O_needle = " << O_needle.transpose() << endl;
                 cout << "O_exit_pt = " << O_exit_pt.transpose() << endl;
+                
                 gripper_affines_wrt_camera.clear();
+                gripper2_affines_wrt_camera.clear();
+                
+                 // needle_x = 0;
+	            needle_y = 0;
+                 
+                  ik_score = 0;
 
-                needlePlanner.simple_horiz_kvec_motion(O_needle, r_needle, kvec_yaw, gripper_affines_wrt_camera);
-                int nposes = gripper_affines_wrt_camera.size();
-                ROS_WARN("at kvec_yaw = %f, computed %d needle-drive gripper poses ", kvec_yaw, nposes);
-                if (nposes >= g_npts_good) {
+                  needlePlanner.compute_grasp_transform(needle_x, needle_y);
+                    
+                    needle_x2 = 3.14;
+                    needle_y2 = 0;
+              
+                  needlePlanner.compute_grasp2_transform(needle_x2, needle_y2);
+
+                  needlePlanner.compute_tissue_frame_wrt_camera(O_entrance_pt, O_exit_pt, tissue_normal);
+                 
+                // needlePlanner.compute_needle_drive_gripper_affines is computing circular needle driving
+
+                  needlePlanner.compute_needle_drive_gripper_affines(gripper_affines_wrt_camera, gripper2_affines_wrt_camera, ik_ok_array, ik_score);
+                         
+               
+                // Dr. Newman's code, needlePlanner.simple_horiz_kvec_motion is special case for needle_x=0 and needle_y=0
+                // Add by DLC 5-26-2016 also in test_main, test_main_v3        
+                 
+                // needlePlanner.simple_horiz_kvec_motion(O_needle, r_needle, kvec_yaw, gripper_affines_wrt_camera, ik_ok_array, ik_score);
+                
+
+                // 
+                 int nposes = gripper_affines_wrt_camera.size();
+                     cout<<"ik_ok_point:: "<<ik_ok_array.transpose()<<endl;
+                     cout<<"score:: "<<ik_score<<endl;
+                     ROS_WARN("at kvec_yaw = %f, computed %d needle-drive gripper poses, score %d ", kvec_yaw, nposes, ik_score);
+                
+                
+                    if ((nposes >= g_npts_good) & (ik_score>0)){
+                       exitPoint.x = O_exit_pt(0);
+                       exitPoint.y = O_exit_pt(1);
+                       exitPoint.z = O_exit_pt(2);
+                       p32.x = O_exit_pt(0);
+                       p32.y = O_exit_pt(1);
+                       p32.z = O_exit_pt(2);
+                    
+                       outfile<<ik_score<<", "<<O_entrance_pt(0)<<", "<<O_entrance_pt(1)<<", "<<O_exit_pt(0)<<", "<<O_exit_pt(1)<<endl;
+
+                       exit_pt_publisher.publish(exitPoint);
+                       polygon_msg.points.push_back(p32);
+                       exit_pts_score.data.push_back(ik_score);  
+                      exit_points.push_back(exitPoint); //not used...
+                    }
+                // 
+
+                // Start from here gripper with respect to tissue
+             
+               /*
+                    ik_score = 741.0;
+                    exit_pts_score.data.push_back(ik_score); 
+                    exit_pt_score_publisher.publish(exit_pts_score);
+                  
                     exitPoint.x = O_exit_pt(0);
                     exitPoint.y = O_exit_pt(1);
                     exitPoint.z = O_exit_pt(2);
                     p32.x = O_exit_pt(0);
                     p32.y = O_exit_pt(1);
                     p32.z = O_exit_pt(2);
-                    exit_pt_publisher.publish(exitPoint);
+                   
                     polygon_msg.points.push_back(p32);
-                    exit_points.push_back(exitPoint); //not used...
-                }
-                if (polygon_msg.points.size()>0) {
+                    exit_points.push_back(exitPoint);
+                   
+                    exit_pt_publisher.publish(exitPoint);
                     exit_pt_array_publisher.publish(polygon_msg);
-                }
+                    
+                    gripper1_motion<<0.0,0.0,0.008;
+                    gripper2_motion<<-0.005,0.004,0.008;
+                    
+                    double dt=2.0;
+                       
+                    needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+                                                        
+                    for(int kstep = 0; kstep < 10; kstep +=1){
+                       
+                       gripper1_motion(0) +=0.005;
+                       gripper1_motion(1) = 0.0;
+                       gripper1_motion(2) = 0.008;
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+                       
+                                           
+                    }  
+                     
+                     for(int kstep = 0; kstep < 9; kstep +=1){
+                       
+                       gripper2_motion(0) +=0.005;
+                       gripper2_motion(1)  = -0.006;
+                       gripper2_motion(2)  =  0.008;
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+                       
+                                           
+                    }  
+                
+                   for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper1_motion(2) += 0.004;
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+                       
+                                           
+                    }  
+
+                   for(int kstep = 0; kstep < 5; kstep +=1){
+                       
+                       gripper1_motion(0) -= 0.004;
+                                         
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+                       
+                                           
+                    }  
+                   
+                   for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper1_motion(2) -= 0.004;
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+                       
+                                           
+                    }  
+
+
+                   for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper2_motion(2) += 0.004;
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+                       
+                                           
+                    }  
+
+                    
+                  for(int kstep = 0; kstep < 5; kstep +=1){
+                       
+                       gripper2_motion(0) -= 0.004;
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+   
+                  }  
+                  
+                 for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper2_motion(2) -= 0.004;
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+                       
+                 }  
+
+                 for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper1_motion(2) += 0.004;
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+                
+                                           
+                 }  
+
+                 for(int kstep = 0; kstep < 5; kstep +=1){
+                       
+                       gripper1_motion(0) -= 0.004;
+                                         
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+                       
+                                           
+                 }  
+                   
+                 for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper1_motion(2) -= 0.004;
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+                       
+                                           
+                 }  
+
+                for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper2_motion(2) += 0.004;
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+                       
+                                           
+                }  
+
+                    
+               for(int kstep = 0; kstep < 5; kstep +=1){
+                       
+                       gripper2_motion(0) -= 0.004;
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+   
+               }  
+                  
+               for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper2_motion(2) -= 0.004;
+                       dt += 0.2;
+                       
+                       needlePlanner.compute_knottying_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, dt);
+                       
+              }  
+
+             */
+              
             }
-        }
+            
+                 if (polygon_msg.points.size()>0) {
+                     exit_pt_score_publisher.publish(exit_pts_score);
+                     exit_pt_array_publisher.publish(polygon_msg);// for rviz display
+                     cout << "size of exit points: " << polygon_msg.points.size() << endl;
+                  }
+         
+         outfile.close(); 
+         ROS_WARN("file closed");    
+        
+       }
+     }
+        
         ros::spinOnce();
         ros::Duration(0.01).sleep();
     }

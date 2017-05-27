@@ -8,15 +8,13 @@
     <include>
       <uri>model://sun</uri>
     </include>
-    <include>
+    <!--include>
         <uri>model://davinci_table</uri>
         <pose>0.0 0 0 0 -0 0</pose>
-        
-          
-    </include>
+    </include-->
     <include>
-        <uri>model://1mm_bar</uri>
-         <pose>0.0 0 0.7 0 0 0</pose>
+        <uri>model://small_checkerboard</uri>
+         <pose>0.0 0 0.6 0 0 0</pose>
     </include>
   
             

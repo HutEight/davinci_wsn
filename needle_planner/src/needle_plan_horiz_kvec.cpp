@@ -13,6 +13,8 @@
 #include <visualization_msgs/Marker.h>
 #include <tf/transform_listener.h>
 #include <tf/LinearMath/Vector3.h>
+#include <iostream>
+#include <fstream>
 
 //example use of needle-planner library
 
@@ -201,7 +203,15 @@ void exitMarkerCallback(const visualization_msgs::Marker& marker) {
     ROS_INFO("coors w/rt frame_id: %f, %f, %f",marker.pose.position.x,marker.pose.position.y,marker.pose.position.z);
     tf::StampedTransform stfMarkerWrtCamera;
     //string marker_frame(marker.header.frame_id);
-    g_tfListener_ptr->lookupTransform("left_camera_optical_frame", marker.header.frame_id, ros::Time(0), stfMarkerWrtCamera);
+    return;
+    try {
+           
+                g_tfListener_ptr->lookupTransform("left_camera_optical_frame", marker.header.frame_id, ros::Time(0), stfMarkerWrtCamera);
+        } catch (tf::TransformException &exception) {
+            ROS_WARN("%s", exception.what());
+            return;
+        }
+    //continue here if transform OK
     tf::Transform tfMarkerWrtCamera(stfMarkerWrtCamera.getBasis(),stfMarkerWrtCamera.getOrigin()); //get tf from stamped tf    
     geometry_msgs::Point marker_pt = marker.pose.position;
     geometry_msgs::Point marker_pt_wrt_camera = xform_point(marker_pt,tfMarkerWrtCamera);
@@ -222,7 +232,7 @@ int main(int argc, char** argv) {
     ros::Subscriber pt_subscriber = nh.subscribe("/entrance_and_exit_pts", 1, inPointsCallback);
     ros::Subscriber entry_pt_subscriber = nh.subscribe("/thePoint", 1, entryPointCallback);
    
-    ros::Subscriber exit_marker_subscriber = nh.subscribe("/final_point_marker",1,exitMarkerCallback);
+   // ros::Subscriber exit_marker_subscriber = nh.subscribe("/final_point_marker",1,exitMarkerCallback);
 //  ros::Publisher finalPointPub = nh.advertise<visualization_msgs::Marker>("/final_point_marker", 0);
 
     init_poses();
@@ -237,7 +247,14 @@ int main(int argc, char** argv) {
     Eigen::Vector3d in_to_out_vec;
     double kvec_yaw;
     
+    Eigen::Vector3d gripper1_motion;
+    Eigen::Vector3d gripper2_motion;
 
+    Eigen::Vector3d bvec_g1_wrt_tissue;
+    Eigen::Vector3d nvec_g1_wrt_tissue;
+    Eigen::Vector3d bvec_g2_wrt_tissue;
+    Eigen::Vector3d nvec_g2_wrt_tissue;
+    Eigen::Vector3d old;   
 
     //cout<<"enter kvec_yaw: (e.g. 0-2pi): ";
     //cin>>kvec_yaw;
@@ -255,24 +272,59 @@ int main(int argc, char** argv) {
      */
     Eigen::Affine3d affine_pose;
     vector <Eigen::Affine3d> gripper_affines_wrt_camera;  //put answers here  
+    vector <Eigen::Affine3d> gripper2_affines_wrt_camera;
+    
+    Eigen::VectorXi ik_ok_array(45);
+    int ik_score=0;
+    
     
     ROS_INFO("entering loop...");
     while (ros::ok()) {
         if (g_got_new_points) {
             g_got_new_points = false;
         //compute O_needle from entry and exit points:
+        
+        g_O_exit_point(0) = g_O_entry_point(0);
+        g_O_exit_point(2) = g_O_entry_point(2);
         O_needle = 0.5 * (g_O_entry_point + g_O_exit_point);
         O_needle(2) -= DEFAULT_NEEDLE_AXIS_HT;
 
-
         in_to_out_vec = g_O_exit_point - g_O_entry_point;
         //vector from entry to exit is 90-deg away from needle z-axis, so add pi/2
-        kvec_yaw = atan2(in_to_out_vec(1), in_to_out_vec(0))+M_PI/2.0;
+        
+        // DLC for negative needle drive
+         kvec_yaw = atan2(in_to_out_vec(1), in_to_out_vec(0))+M_PI/2.0;   
+        
+        // DLC for positive needle drive  
+        //  kvec_yaw = atan2(in_to_out_vec(1), in_to_out_vec(0))-M_PI/2.0;
+        
         ROS_INFO("using kvec_yaw = %f",kvec_yaw);
 
             //compute the tissue frame in camera coords, based on point-cloud selections:
 
-            needlePlanner.simple_horiz_kvec_motion(O_needle, r_needle, kvec_yaw, gripper_affines_wrt_camera);
+            //comment out by dlc
+            //needlePlanner.simple_horiz_kvec_motion(O_needle, r_needle, kvec_yaw, gripper_affines_wrt_camera, ik_ok_array, ik_score);
+           
+            //DLC
+            double needle_x=0.0;
+            double needle_y=0.0;
+            double needle_x2=3.14;
+            double needle_y2=0.0;
+            double jaw1_open_close = 0;
+            double jaw2_open_close = 0;
+            double dt=0;
+             
+
+            Eigen::Vector3d tissue_normal;
+            tissue_normal << 0, 0, -1;
+
+            needlePlanner.compute_grasp_transform(needle_x, needle_y);
+            needlePlanner.compute_grasp2_transform(needle_x2, needle_y2);
+            needlePlanner.compute_tissue_frame_wrt_camera(g_O_entry_point, g_O_exit_point, tissue_normal);
+            needlePlanner.compute_needle_drive_gripper_affines(gripper_affines_wrt_camera, gripper2_affines_wrt_camera, ik_ok_array, ik_score);
+          
+            //DLC
+
             int nposes = gripper_affines_wrt_camera.size();
             ROS_INFO("computed %d gripper poses w/rt camera", nposes);
 
@@ -281,7 +333,544 @@ int main(int argc, char** argv) {
                 cout << gripper_affines_wrt_camera[i].linear() << endl;
                 cout << "origin: " << gripper_affines_wrt_camera[i].translation().transpose() << endl;
             }
+            cout << "storing points" << endl;
             needlePlanner.write_needle_drive_affines_to_file(gripper_affines_wrt_camera);
+
+            //
+
+            bvec_g1_wrt_tissue << 0, -1, 0;
+            nvec_g1_wrt_tissue << 0, 0, -1;
+
+            bvec_g2_wrt_tissue << 0, 1, 0;
+            nvec_g2_wrt_tissue << 0, 0, -1;
+
+            gripper2_motion<<0.000, 0.005, 0.008;
+            gripper1_motion<<0.000, 0.010, 0.008;
+
+            jaw1_open_close = 0.5;
+            jaw2_open_close = 0.2;
+            dt = 2;
+        
+            needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+            
+   
+  for(int kstep = 0; kstep < 5; kstep +=1){
+                      
+                 gripper2_motion(0) += 0.006;
+                 gripper2_motion(1) =  0.005;
+                 gripper2_motion(2) += 0.002;
+                 dt += 0.2;
+                           
+              needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                             
+                    }  
+
+           for(int kstep = 0; kstep < 1; kstep +=1){
+                 
+                 bvec_g1_wrt_tissue << 0, -1, 0;
+                 nvec_g1_wrt_tissue << -0.707, 0, -0.707;
+                 bvec_g2_wrt_tissue << 0, 1, 0;
+                 nvec_g2_wrt_tissue << -0.707, 0, -0.707;
+    
+                 dt += 2;
+                           
+              needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);            
+                             
+                    } 
+
+           for(int kstep = 0; kstep < 1; kstep +=1){
+                 gripper1_motion<<0.014, 0.01, 0.008;     
+                 dt += 1;
+                           
+               needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                             
+                   } 
+
+
+           for(int kstep = 0; kstep < 1; kstep +=1){
+                 gripper1_motion<<0.014, -0.005, 0.008;     
+                 dt += 1;
+                           
+              needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                             
+                   } 
+
+
+           for(int kstep = 0; kstep < 1; kstep +=1){
+                 jaw1_open_close = 0.0;
+                
+                 dt += 0.5;
+           
+              needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);                       
+     
+                   } 
+
+          for(int kstep = 0; kstep < 1; kstep +=1){
+                 jaw2_open_close = 0.5;
+                
+                 dt += 0.5;
+                           
+              needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                             
+                   }
+
+        for(int kstep = 0; kstep < 1; kstep +=1){
+                 
+               gripper2_motion(1) +=  -0.01;
+                
+                 dt += 0.5;
+                           
+              needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                             
+                   }
+
+        for(int kstep = 0; kstep < 5; kstep +=1){
+                 
+                   
+                 gripper1_motion(0) += 0.003;
+                 gripper1_motion(1) =  -0.005;
+                 gripper1_motion(2) += 0.002;
+                 dt += 0.2;
+                           
+              needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                             
+                   }
+            
+        for(int kstep = 0; kstep < 5; kstep +=1){
+                 
+                 gripper2_motion(0) += -0.003;
+                 gripper2_motion(2) += -0.002;
+                 dt += 0.2;
+                
+                           
+             needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                             
+                   }
+
+         for(int kstep = 0; kstep <1; kstep +=1){
+                      
+                 gripper2_motion(1)  =  0.005;
+                
+                 dt += 1;
+                           
+               needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                             
+                    }  
+
+         for(int kstep = 0; kstep < 1; kstep +=1){
+                      
+               jaw2_open_close = 0.0; 
+              
+                
+                 dt += 0.2;
+                           
+              needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                             
+                    }  
+
+
+           for(int kstep = 0; kstep < 1; kstep +=1){
+                 jaw1_open_close = 0.5;
+                
+                 dt += 0.5;
+           
+              needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);                       
+     
+                   } 
+
+      
+        for(int kstep = 0; kstep < 1; kstep +=1){
+                 
+                 bvec_g1_wrt_tissue << 0, -1, 0;
+                 nvec_g1_wrt_tissue << -1, 0,  0;
+
+                 bvec_g2_wrt_tissue << 0, 1, 0;
+                 nvec_g2_wrt_tissue << 0, 0, -1;
+
+
+                 dt += 1;
+               
+                           
+             needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                             
+                   }
+
+ 
+    
+           // suture pull
+
+           //
+                                                                         
+                    for(int kstep = 0; kstep < 6; kstep +=1){
+                       
+                       gripper2_motion(0) +=0.005;
+                       gripper2_motion(1) = 0.0;
+                       gripper2_motion(2) = 0.008;
+                       dt += 0.5;
+                       
+                   needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                       
+                                           
+                    }  
+                     
+                     for(int kstep = 0; kstep < 1; kstep +=1){
+                       
+                       gripper1_motion(0)  =  0.0385;
+                       gripper1_motion(1)  = -0.005;
+                       gripper1_motion(2)  =  0.008;
+                       jaw1_open_close = 0.4;
+                       dt += 2;
+                       
+                    needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                       
+                                           
+                    }  
+                
+                   for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper2_motion(2) += 0.004;
+                       dt += 0.2;
+                       
+                   needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                       
+                                           
+                    }  
+
+                   for(int kstep = 0; kstep < 5; kstep +=1){
+                       
+                       gripper2_motion(0) -= 0.004;
+                                         
+                       dt += 0.2;
+                       
+                    needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                       
+                                           
+                    }  
+                   
+                   for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper2_motion(2) -= 0.004;
+                       dt += 0.2;
+                       
+            needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                       
+                                           
+                    }  
+
+
+                   for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper1_motion(2) += 0.004;
+                       dt += 0.2;
+                       
+           needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                       
+                                           
+                    }  
+
+                    
+                  for(int kstep = 0; kstep < 5; kstep +=1){
+                       
+                       gripper1_motion(0) -= 0.004;
+                       dt += 0.2;
+                       
+                   needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+                  }  
+                  
+                 for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper1_motion(2) -= 0.004;
+                       dt += 0.2;
+                       
+                   needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                       
+                 }  
+
+                 for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper2_motion(2) += 0.004;
+                       dt += 0.2;
+                       
+                 needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                
+                                           
+                 }  
+
+                 for(int kstep = 0; kstep < 5; kstep +=1){
+                       
+                       gripper2_motion(0) -= 0.004;
+                                         
+                       dt += 0.2;
+                       
+                 needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                       
+                                           
+                 }  
+                   
+                 for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper2_motion(2) -= 0.004;
+                       dt += 0.2;
+                       
+                  needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                       
+                                           
+                 }  
+
+                               
+               for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper1_motion(2) += 0.004;
+                       dt += 0.2;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               }  
+                  
+             for(int kstep = 0; kstep < 5; kstep +=1){
+                       
+                       gripper1_motion(0) -= 0.0045;
+                       dt += 0.2;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               }  
+
+                      old = gripper1_motion;
+                      
+
+
+ for(int kstep = 0; kstep < 1; kstep +=1){
+
+                       bvec_g1_wrt_tissue <<  0, 0, -1;
+                       nvec_g1_wrt_tissue << -1, 0,  0;
+                       gripper1_motion(0)  = -0.003;
+                       gripper1_motion(1)  =  0.0;
+                       gripper1_motion(2)  =  0.004;  
+                       dt += 2;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               }  
+              
+ for(int kstep = 0; kstep < 1; kstep +=1){
+
+                       bvec_g1_wrt_tissue <<  0, 0, -1;
+                       nvec_g1_wrt_tissue << -0.707, 0,  0.707;
+                       gripper1_motion(0)  = -0.006;
+                       gripper1_motion(1)  = -0.0;
+                       gripper1_motion(2)  =  0.001;  
+                       dt += 2;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               }  
+
+
+                     for(int kstep = 0; kstep < 1; kstep +=1){
+
+                       jaw1_open_close = 0.0;
+                       dt += 1;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               }  
+
+                      gripper1_motion = old;
+
+                     for(int kstep = 0; kstep < 1; kstep +=1){
+
+                       bvec_g1_wrt_tissue <<  0, -1, 0;
+                       nvec_g1_wrt_tissue << -1, 0,  0;
+                       
+                       
+                       gripper1_motion(1)  +=  0.005;
+                       gripper1_motion(2)  -=  0.005;
+                      
+                       gripper2_motion(1)  -= 0.0015;
+                       gripper2_motion(2)  -= 0.005;
+                     
+                       dt += 2;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               }  
+
+   
+                     for(int kstep = 0; kstep < 5; kstep +=1){
+
+                     
+                       gripper1_motion(0)  += 0.004;                                             
+                       gripper2_motion(0)  -= 0.004;
+                                          
+                       dt += 0.5;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               } 
+
+
+                     for(int kstep = 0; kstep < 1; kstep +=1){
+
+                       
+                       gripper1_motion(1)   = -0.005;
+                       jaw1_open_close = 0.5;
+
+                       gripper2_motion(1)   =  0.005;
+                       gripper2_motion(2)   =  0.008; 
+                      
+                       dt += 2;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               }  
+
+                   for(int kstep = 0; kstep < 1; kstep +=1){
+
+                       
+                       gripper1_motion(1)   = 0.002;
+                                           
+                       dt += 2;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               }  
+
+
+
+                     for(int kstep = 0; kstep < 5; kstep +=1){
+
+                       
+                       gripper1_motion(0)  -= 0.004;
+                       gripper1_motion(1)  -= 0.001;                      
+                       gripper1_motion(2)   = 0.008;                                   
+                      
+                       dt += 0.3;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               }  
+
+                    for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper2_motion(2) += 0.004;
+                       dt += 0.2;
+                       
+                 needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                
+                                           
+                 }  
+  
+                    for(int kstep = 0; kstep < 5; kstep +=1){
+                           
+                       gripper2_motion(0) += 0.0035;
+                                         
+                       dt += 0.2;
+                       
+                 needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                       
+                                           
+                 }  
+                   
+                   for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper2_motion(2) -= 0.004;
+                       dt += 0.2;
+                       
+                  needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                       
+                                           
+                 }  
+
+ 
+                  for(int kstep = 0; kstep < 3; kstep +=1){
+                       
+                       gripper1_motion(2) += 0.004;
+                       dt += 0.2;
+                       
+                 needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                       
+                                           
+                 }  
+
+                    
+                  for(int kstep = 0; kstep < 5; kstep +=1){
+                       
+                       gripper1_motion(0) += 0.004;
+                       dt += 0.2;
+
+                  needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+                       
+                                           
+                 }  
+
+                  for(int kstep = 0; kstep < 1; kstep +=1){
+
+                       bvec_g1_wrt_tissue <<  0, 0, -1;
+                       nvec_g1_wrt_tissue << -1, 0,  0;
+                       gripper1_motion(1)  =  0.0;
+                       gripper1_motion(2)  =  0.004;  
+                       dt += 2;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               }  
+              
+             
+                  for(int kstep = 0; kstep < 1; kstep +=1){
+
+                       bvec_g1_wrt_tissue <<   0, 0, -1;
+                       nvec_g1_wrt_tissue <<  -0.707, 0,  -0.707;
+                       gripper1_motion(0)  =  0.018;
+                       gripper1_motion(1)  =  0.0;
+                       gripper1_motion(2)  =  0.001;  
+                       dt += 2;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               }  
+
+                     for(int kstep = 0; kstep < 1; kstep +=1){
+
+                       jaw1_open_close = 0.0;
+                       dt += 1;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               }                   
+
+ for(int kstep = 0; kstep < 1; kstep +=1){
+
+                       bvec_g1_wrt_tissue <<  0, 0, -1;
+                       nvec_g1_wrt_tissue << -1, 0,  0;
+                       gripper1_motion(0)  =  0.010;
+                       gripper1_motion(1)  =  0.002;
+                       gripper1_motion(2)  =  0.004;  
+                       dt += 2;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               }  
+
+
+                     for(int kstep = 0; kstep < 3; kstep +=1){
+
+                     
+                       gripper1_motion(1)  += 0.003;                                             
+                       gripper2_motion(1)  -= 0.005;
+                                          
+                       dt += 0.2;
+                       
+                      needlePlanner.compute_suturepull_gripper_frame_wrt_camera(gripper1_motion, gripper2_motion, bvec_g1_wrt_tissue, nvec_g1_wrt_tissue, bvec_g2_wrt_tissue, nvec_g2_wrt_tissue, jaw1_open_close, jaw2_open_close, dt);
+   
+               } 
+
+
+
+             
+         //
+
         }
         
         ros::spinOnce();

@@ -35,8 +35,71 @@
 
     <include>
         <uri>model://needle_r</uri>
-         <pose>0.006 -0.028 0.780 1.57 0 0</pose>
+         <pose>0.006 -0.025 0.780 1.57 0 0</pose>
     </include>>
+    
+    <include>
+        <uri>model://small_green_marker</uri>
+         <pose>-0.030 0.025 0.780 0 0 0</pose>
+    </include>
+    
+    <include>
+        <uri>model://small_green_marker</uri>
+         <pose>-0.015 0.025 0.780 0 0 0</pose>
+    </include>
+
+    <include>
+        <uri>model://small_green_marker</uri>
+         <pose>0.00 0.025 0.780 0 0 0</pose>
+    </include>
+     <include>
+        <uri>model://small_green_marker</uri>
+         <pose>0.015 0.025 0.780 0 0 0</pose>
+    </include>
+    <include>
+        <uri>model://small_green_marker</uri>
+         <pose>0.030 0.025 0.780 0 0 0</pose>
+    </include>
+
+    <include>
+        <uri>model://small_green_marker</uri>
+         <pose>0.030 -0.025 0.780 0 0 0</pose>
+    </include>
+    <include>
+        <uri>model://small_green_marker</uri>
+         <pose>0.015 -0.025 0.780 0 0 0</pose>
+    </include>
+    <include>
+        <uri>model://small_green_marker</uri>
+         <pose>0.00 -0.025 0.780 0 0 0</pose>
+    </include>
+    <include>
+        <uri>model://small_green_marker</uri>
+         <pose>-0.015 -0.025 0.780 0 0 0</pose>
+    </include>
+    <include>
+        <uri>model://small_green_marker</uri>
+         <pose>-0.030 -0.025 0.780 0 0 0</pose>
+    </include>
+    <include>
+        <uri>model://tiny_red_marker</uri>
+         <pose>0.0 0.0 0.780 0 0 0</pose>
+    </include>
+
+    <include>
+        <uri>model://tiny_red_marker</uri>
+         <pose>0.01 0.003 0.780 0 0 0</pose>
+    </include>
+
+    <include>
+        <uri>model://tiny_red_marker</uri>
+         <pose>0.01 0.018 0.780 0 0 0</pose>
+    </include>
+
+    <!--include>
+        <uri>model://long_cylinder</uri>
+         <pose>0.0 0.0 0.780 0 0 0</pose>
+    </include>-->
 
     <!--include>
         <uri>model://davinci_table</uri>
@@ -51,6 +114,12 @@
     <physics type="ode">
     <gravity>0 0 -0.1</gravity>
       <real_time_update_rate>1000.0</real_time_update_rate>
+     <ode>
+        <solver>
+          <type>quick</type>
+          <iters>500</iters>
+        </solver>
+      </ode>
     </physics>
   </world>
 </sdf>

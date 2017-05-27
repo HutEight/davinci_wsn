@@ -22,6 +22,12 @@
 
 #include <needle_planner/needle_planner.h>
 #include <davinci_kinematics/davinci_kinematics.h>
+#include <Eigen/Eigen>
+#include <Eigen/Dense>
+#include <geometry_msgs/Polygon.h>
+#include "std_msgs/MultiArrayLayout.h"
+#include "std_msgs/MultiArrayDimension.h"
+#include "std_msgs/Int32MultiArray.h"
 
 //example use of needle-planner library
 bool test_debug = false;
@@ -90,6 +96,8 @@ int main(int argc, char** argv) {
     entrance_pt << -0.1, 0.05, 0.1; //100mm under camera; slightly forward, to avoid jnt lims should be OK
     exit_pt << -0.09, 0.05, 0.1; // exit pt is shifted along camera-frame +x axis relative to entrance pt
     vector <Eigen::Affine3d> gripper_affines_wrt_camera; //put answers here 
+    vector <Eigen::Affine3d> gripper2_affines_wrt_camera;
+    
     vector <Eigen::Affine3d> vetted_gripper_affines_wrt_camera;
 
     ROS_INFO("instantiating  forward solver and an ik_solver");
@@ -179,6 +187,9 @@ int main(int argc, char** argv) {
     int best_drive_score = 0;
     int drive_score = 0;
     int best_run = 0;
+
+    Eigen::VectorXi ik_ok_array(40); //Add by DLC 5-26-2016 also in test_main, test_main_v2
+    int ik_score=0;
     
     //while (ros::ok()) 
     {
@@ -210,9 +221,11 @@ int main(int argc, char** argv) {
                         exit_pt = entrance_pt + nvec_tissue;
                         needlePlanner.compute_tissue_frame_wrt_camera(entrance_pt, exit_pt, tissue_normal);
                         gripper_affines_wrt_camera.clear();
+                        gripper2_affines_wrt_camera.clear();
+
                         vetted_gripper_affines_wrt_camera.clear();
 
-                        needlePlanner.compute_needle_drive_gripper_affines(gripper_affines_wrt_camera);
+                        needlePlanner.compute_needle_drive_gripper_affines(gripper_affines_wrt_camera, gripper2_affines_wrt_camera, ik_ok_array, ik_score);
                         int nposes = gripper_affines_wrt_camera.size();
                         //ROS_INFO("computed %d gripper poses w/rt camera", nposes);
                         Eigen::Affine3d affine_pose, affine_gripper_wrt_base_frame, affine_gripper_wrt_base_fk;

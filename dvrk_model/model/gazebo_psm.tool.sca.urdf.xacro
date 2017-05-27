@@ -148,13 +148,13 @@
        <surface>
             <friction>
               <ode>
-                <mu>30.0</mu>
-                <mu2>30.0</mu2>
+                <mu>1000.0</mu>
+                <mu2>1000.0</mu2>
               </ode>
             </friction>
             <contact>
               <ode>
-                <kp>1000000.0</kp>
+                <kp>10000.0</kp>
                 <kd>100.0</kd>
                 <max_vel>1.0</max_vel>
                 <min_depth>0.001</min_depth>
@@ -171,6 +171,7 @@
         izz="0.005"/>
     </inertial> 
     </link>
+   
     <!-- attach fingertip pad  -->
     <joint name="${prefix}fingertip2_joint" type="fixed">
       <parent link="${prefix}tool_wrist_sca_ee_link_2"/>
@@ -178,6 +179,103 @@
       <axis xyz="0 0 1"/>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </joint>
+
+   <!-- Der-Lin attach fingertip pad 2 blocking block -->
+    <joint name="${prefix}fingertip2_blockjoint" type="fixed">
+      <parent link="${prefix}tool_wrist_sca_ee_link_2"/>
+      <child link="${prefix}tip2_block"/>
+      <axis xyz="0 0 1"/>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+    </joint>
+
+  <!-- Der-Lin adding a fingertip2 blocking for grasping -->
+    <link name="${prefix}tip2_block">
+     <visual>
+        <origin rpy="0 0 0" xyz="0.001 0.005 0.0005"/>
+        <geometry>
+          <box size="0.002 0.01 0.004"/>
+        </geometry>
+     </visual>
+      <collision name = "tip2_seg_1">
+        <origin rpy="0 0 0" xyz="0.0 0.010 0.0005"/>
+        <geometry>
+         <cylinder length="0.004" radius="0.0007"/>
+        </geometry>
+       <surface>
+            <friction>
+              <ode>
+                <mu>1000.0</mu>
+                <mu2>1000.0</mu2>
+              </ode>
+            </friction>
+            <contact>
+              <ode>
+                <kp>10000.0</kp>
+                <kd>1000.0</kd>
+                <max_vel>1.0</max_vel>
+                <min_depth>0.001</min_depth>
+              </ode>
+            </contact>
+          </surface>
+      </collision>
+     
+      <collision name = "tip2_seg_2">
+        <origin rpy="0 0 0" xyz="0.0 0.006 0.0005"/>
+        <geometry>
+          <!--box size="0.002 0.001 0.004"/-->
+         <cylinder length="0.004" radius="0.0007"/>
+        </geometry>
+       <surface>
+            <friction>
+              <ode>
+                <mu>1000.0</mu>
+                <mu2>1000.0</mu2>
+              </ode>
+            </friction>
+            <contact>
+              <ode>
+                <kp>10000.0</kp>
+                <kd>1000.0</kd>
+                <max_vel>1.0</max_vel>
+                <min_depth>0.001</min_depth>
+              </ode>
+            </contact>
+          </surface>
+      </collision>
+
+      <collision name = "tip2_seg_3">
+        <origin rpy="0 0 0.1745" xyz="0.0004 0.008 0.0005"/>
+        <geometry>
+          <box size="0.002 0.002 0.004"/>
+        </geometry>
+       <surface>
+            <friction>
+              <ode>
+                <mu>1000.0</mu>
+                <mu2>1000.0</mu2>
+              </ode>
+            </friction>
+            <contact>
+              <ode>
+                <kp>10000.0</kp>
+                <kd>1000.0</kd>
+                <max_vel>1.0</max_vel>
+                <min_depth>0.001</min_depth>
+              </ode>
+            </contact>
+          </surface>
+      </collision>
+
+
+     <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia
+        ixx="0.01" ixy="0.0" ixz="0.0"
+        iyy="0.01" iyz="0.0"
+        izz="0.005"/>
+    </inertial> 
+    </link>
 
 <!-- wsn: other fingertip -->
     <link name="${prefix}fingertip1">
@@ -187,7 +285,7 @@
           <box size="0.002 0.01 0.004"/>
         </geometry>
      </visual>
-      <collision>
+       <collision>
         <origin rpy="0 0 0" xyz="-0.001 0.005 0.0005"/>
         <geometry>
           <box size="0.002 0.01 0.004"/>
@@ -195,13 +293,13 @@
        <surface>
             <friction>
               <ode>
-                <mu>30.0</mu>
-                <mu2>30.0</mu2>
+                <mu>1000.0</mu>
+                <mu2>1000.0</mu2>
               </ode>
             </friction>
             <contact>
               <ode>
-                <kp>1000000.0</kp>
+                <kp>10000.0</kp>
                 <kd>100.0</kd>
                 <max_vel>1.0</max_vel>
                 <min_depth>0.001</min_depth>
@@ -209,6 +307,7 @@
             </contact>
           </surface>
       </collision>
+    
      <inertial>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <mass value="0.05"/>
@@ -218,6 +317,8 @@
         izz="0.005"/>
     </inertial> 
     </link>
+
+
     <!-- attach fingertip pad 1  -->
     <joint name="${prefix}fingertip1_joint" type="fixed">
       <parent link="${prefix}tool_wrist_sca_ee_link_1"/>
@@ -225,6 +326,115 @@
       <axis xyz="0 0 1"/>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </joint>
+
+    <!-- Der-Lin attach fingertip pad 1 blocking block -->
+    <joint name="${prefix}fingertip1_blockjoint" type="fixed">
+      <parent link="${prefix}tool_wrist_sca_ee_link_1"/>
+      <child link="${prefix}tip1_block"/>
+      <axis xyz="0 0 1"/>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+    </joint>
+
+    <!-- Derlin: fingertip1 blocking -->
+    <link name="${prefix}tip1_block">
+     <visual>
+        <origin rpy="0 0 0" xyz="-0.001 0.005 0.0005"/>
+        <geometry>
+          <box size="0.002 0.01 0.004"/>
+        </geometry>
+     </visual>
+       <collision name = "tip1_seg1">
+        <origin rpy="0 0 0" xyz="0.0 0.010 0.0005"/>
+        <geometry>
+          <!--box size="0.003 0.002 0.004"/-->
+          <cylinder length="0.004" radius="0.0007"/>
+        </geometry>
+       <surface>
+            <friction>
+              <ode>
+                <mu>1000.0</mu>
+                <mu2>1000.0</mu2>
+              </ode>
+            </friction>
+            <contact>
+              <ode>
+                <kp>10000.0</kp>
+                <kd>1000.0</kd>
+                <max_vel>1.0</max_vel>
+                <min_depth>0.001</min_depth>
+              </ode>
+            </contact>
+          </surface>
+      </collision>
+      
+      <collision name = "tip1_seg2">
+        <origin rpy="0 0 0" xyz="0.0 0.006 0.0005"/>
+        <geometry>
+          <!--box size="0.002 0.001 0.004"/-->
+         <cylinder length="0.004" radius="0.0007"/>
+        </geometry>
+       <surface>
+            <friction>
+              <ode>
+                <mu>1000.0</mu>
+                <mu2>1000.0</mu2>
+              </ode>
+            </friction>
+            <contact>
+              <ode>
+                <kp>10000.0</kp>
+                <kd>1000.0</kd>
+                <max_vel>1.0</max_vel>
+                <min_depth>0.001</min_depth>
+              </ode>
+            </contact>
+          </surface>
+      </collision>
+
+     <collision name = "tip1_seg_3">
+        <origin rpy="0 0 -0.1745" xyz="-0.0004 0.008 0.0005"/>
+        <geometry>
+          <box size="0.002 0.002 0.004"/>
+        </geometry>
+       <surface>
+            <friction>
+              <ode>
+                <mu>1000.0</mu>
+                <mu2>1000.0</mu2>
+              </ode>
+            </friction>
+            <contact>
+              <ode>
+                <kp>10000.0</kp>
+                <kd>1000.0</kd>
+                <max_vel>1.0</max_vel>
+                <min_depth>0.001</min_depth>
+              </ode>
+            </contact>
+          </surface>
+      </collision>
+
+
+
+
+
+
+
+
+
+
+     <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia
+        ixx="0.01" ixy="0.0" ixz="0.0"
+        iyy="0.01" iyz="0.0"
+        izz="0.005"/>
+    </inertial> 
+    </link>
+
+   
+
 
 
     <!-- tool tip -->

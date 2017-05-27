@@ -1,0 +1,8 @@
+<launch>
+
+
+   <node name="davinci_endoscope" pkg="stereo_sync" type="stereo_sync_node" output="screen"/>
+  
+
+</launch>
+
